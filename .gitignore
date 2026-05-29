@@ -36,5 +36,5 @@ downloaded_papers/
 outputs/
 checkpoints/
 
-# Python virtual env at project root
-.venv/
+# Project-specific
+CLAUDE.md
