@@ -1,0 +1,28 @@
+name: "focal_loss"
+type: "cv.loss"
+domain: "cv"
+spec_version: "1.0"
+description: "Focal Loss for addressing class imbalance in classification/detection tasks"
+
+source:
+  paper: "Focal Loss for Dense Object Detection"
+  arxiv_id: "1708.02002"
+  url: "https://arxiv.org/abs/1708.02002"
+
+interface:
+  inputs:
+    inputs: "(B, num_classes) — logits"
+    targets: "(B,) — class indices"
+  outputs:
+    loss: "scalar — focal loss value"
+
+dependencies:
+  - package: "torch>=1.8"
+
+tags:
+  - focal-loss
+  - class-imbalance
+  - detection
+  - classification
+
+code_file: "focal_loss.py"

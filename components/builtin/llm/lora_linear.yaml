@@ -1,0 +1,28 @@
+name: "lora_linear"
+type: "llm.weight_injection"
+domain: "llm"
+spec_version: "1.0"
+description: "Low-Rank Adaptation (LoRA) wrapper for nn.Linear layers"
+
+source:
+  paper: "LoRA: Low-Rank Adaptation of Large Language Models"
+  arxiv_id: "2106.09685"
+  url: "https://arxiv.org/abs/2106.09685"
+
+interface:
+  inputs:
+    x: "(B, *, in_features)"
+  outputs:
+    output: "(B, *, out_features)"
+
+dependencies:
+  - package: "torch>=1.8"
+
+tags:
+  - lora
+  - peft
+  - fine-tuning
+  - llm
+  - parameter-efficient
+
+code_file: "lora_linear.py"

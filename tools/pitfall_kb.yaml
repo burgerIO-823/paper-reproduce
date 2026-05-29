@@ -1,0 +1,367 @@
+# Pitfall Knowledge Base
+# =====================
+# Known reproduction pitfalls organized by domain, component type, and severity.
+# Each entry:
+#   id: unique identifier
+#   title: short description
+#   domains: [cv, nlp, llm, general]
+#   components: affected component types (for search/matching)
+#   severity: critical | warning | info
+#   paper_claims: what the paper typically says (or omits)
+#   reality: what's actually needed for successful reproduction
+#   resolution: how to address the issue
+#   keywords: searchable terms
+#   source: where this pitfall was reported
+
+pitfalls:
+
+  # ── Data Augmentation ──────────────────────────────────────────────
+  - id: "aug-001"
+    title: "未公开的数据增强策略"
+    domains: [cv, general]
+    components: [augmentations, training_recipe]
+    severity: critical
+    paper_claims: "We use standard data augmentation (random crop, flip)"
+    reality: >
+      论文往往只说了"标准增强"，但实际使用了更复杂的增强策略
+      （如 RandAugment、CutMix、MixUp），或者增强参数（如裁剪比例、
+      颜色抖动量级）对结果有显著影响。许多论文的消融实验表明增强策略
+      贡献了 1-3% 的精度提升。
+    resolution: >
+      1. 检查论文是否引用了某个增强方法的原文（如 RandAugment 论文）
+      2. 搜索官方代码仓库中的 augmentation 配置
+      3. 从论文的图表中尝试反推增强效果（如样本图片）
+      4. 如果完全无法确定，尝试与同期论文的增强策略对齐
+    keywords: [augmentation, 数据增强, RandAugment, CutMix, MixUp, random crop, flip]
+    source: "社区广泛报告；多数 CV 论文复现的共同问题"
+
+  - id: "aug-002"
+    title: "训练和测试分辨率的差异"
+    domains: [cv]
+    components: [augmentations, evaluation]
+    severity: warning
+    paper_claims: "Input size: 224×224"
+    reality: >
+      许多分类模型在训练时使用 224×224，但测试时使用更大的分辨率
+      （如 256×256 或 288×288）来提升精度。论文正文可能只提训练分辨率，
+      但在附录或代码中实际使用了更大的测试分辨率。
+    resolution: >
+      1. 检查论文的"implementation details"段落
+      2. 搜索是否有 "test resolution" 或 "fine-size" 的提及
+      3. 如果模型支持可变输入，考虑在更大分辨率下评估
+    keywords: [resolution, test size, fine size, 分辨率, inference, 推理]
+    source: "timm 库中多数模型的默认行为"
+
+  # ── Optimizer & LR ─────────────────────────────────────────────────
+  - id: "opt-001"
+    title: "学习率与 batch size 的线性缩放"
+    domains: [cv, nlp, general]
+    components: [optimizer, learning_rate, batch_size]
+    severity: critical
+    paper_claims: "Learning rate = 0.1, batch size = 256"
+    reality: >
+      如果用户无法使用论文指定的 batch size（受限于 GPU 显存），
+      单纯降低 batch size 而保持学习率不变会导致训练不稳定或收敛变慢。
+      线性缩放规则（lr = base_lr × batch_size / base_batch_size）是一个
+      常用启发式，但并不总是精确成立。
+    resolution: >
+      1. 使用线性缩放：new_lr = paper_lr × your_batch_size / paper_batch_size
+      2. 如果 batch size 变化超过 2 倍，建议同时调整 warmup 步数
+      3. 考虑使用梯度累积来模拟大 batch size
+      4. 如果可能，进行小范围 lr sweep
+    keywords: [learning rate, batch size, linear scaling, 学习率, 批量大小, gradient accumulation]
+    source: "Goyal et al. 'Accurate, Large Minibatch SGD' (2017)"
+
+  - id: "opt-002"
+    title: "Weight decay 不应用于 bias 和 normalization 层"
+    domains: [cv, nlp, llm, general]
+    components: [optimizer, weight_decay]
+    severity: warning
+    paper_claims: "Weight decay = 1e-4"（通常没有说明应用到哪些参数）
+    reality: >
+      大多数成功的训练配置会将 weight decay 仅应用于 weight 参数，
+      而不应用于 bias 和 normalization 层的参数（BatchNorm 的 γ,β、
+      LayerNorm 的 γ,β）。对所有参数应用 weight decay 通常会导致
+      性能下降。
+    resolution: >
+      1. 在 PyTorch 中对参数分组：bias/norm 参数设置 weight_decay=0
+      2. 使用 timm、transformers 等库的内置参数分组功能
+      3. 如果论文来自知名团队，推测他们使用了这种标准做法
+    keywords: [weight decay, bias, normalization, BatchNorm, LayerNorm, 权重衰减]
+    source: "PyTorch 社区最佳实践；timm, transformers 的默认行为"
+
+  - id: "opt-003"
+    title: "Adam/AdamW 的 beta 和 epsilon 参数"
+    domains: [nlp, llm, general]
+    components: [optimizer]
+    severity: warning
+    paper_claims: "We use AdamW optimizer"（不提供参数细节）
+    reality: >
+      AdamW 的 β1, β2, ε 参数对训练稳定性有影响，尤其是对于大模型。
+      不同框架的默认值不同（PyTorch 默认 ε=1e-8，TensorFlow 默认 ε=1e-7）。
+      一些训练设置使用 ε=1e-6 来提高稳定性。
+    resolution: >
+      1. 使用 PyTorch 的默认值作为起点：(β1=0.9, β2=0.999, ε=1e-8)
+      2. 如果训练不稳定（NaN loss），尝试增大 ε 到 1e-6
+      3. 检查论文引用的框架和版本
+    keywords: [AdamW, Adam, beta, epsilon, optimizer parameters]
+    source: "HuggingFace transformers 训练配置；LLM 训练经验"
+
+  # ── Normalization ───────────────────────────────────────────────────
+  - id: "norm-001"
+    title: "BatchNorm momentum 的默认值差异"
+    domains: [cv]
+    components: [backbone, normalization]
+    severity: info
+    paper_claims: 通常不提及 BatchNorm momentum 的值
+    reality: >
+      PyTorch 默认 BatchNorm momentum = 0.1，而许多成功的训练配置
+      使用更小的值（如 0.01 或 0.001）。对于小 batch size 场景
+      （如检测/分割任务），这个差异可能显著影响结果。
+    resolution: >
+      1. 对于分类任务，使用默认值 0.1 通常可以
+      2. 对于小 batch size 任务（< 8 per GPU），尝试 0.01
+      3. 如果使用 SyncBN（多 GPU），momentum 需要根据 GPU 数量调整
+    keywords: [BatchNorm, momentum, batch normalization, BN]
+    source: "Detectron2、MMDetection 的训练配置"
+
+  # ── Initialization ──────────────────────────────────────────────────
+  - id: "init-001"
+    title: "权重初始化方式未说明"
+    domains: [cv, nlp, general]
+    components: [backbone, head]
+    severity: warning
+    paper_claims: 通常只说 "random initialization" 或不提及
+    reality: >
+      不同初始化方式（Kaiming、Xavier、truncated normal）对深层网络
+      的收敛速度和最终性能有显著影响。许多论文隐式使用了框架默认值，
+      但如果用户换了一个框架，默认值可能不同。
+    resolution: >
+      1. CV: 卷积/线性层默认使用 Kaiming uniform/normal
+      2. NLP/Transformer: 默认使用 Xavier uniform 或 small std normal
+      3. 如果有预训练权重，初始化方式已由预训练模型决定
+      4. 检查论文引用的 prior work 的初始化方式
+    keywords: [initialization, Kaiming, Xavier, 初始化, weight init]
+    source: "He et al. 'Delving Deep into Rectifiers' (2015)"
+
+  # ── Mixed Precision ─────────────────────────────────────────────────
+  - id: "mp-001"
+    title: "混合精度训练可能导致 NaN loss"
+    domains: [cv, nlp, llm, general]
+    components: [training_recipe, mixed_precision]
+    severity: warning
+    paper_claims: 通常不提及精度设置
+    reality: >
+      许多现代训练使用 fp16 或 bf16 混合精度来加速和节省显存。
+      但某些操作（如 softmax、loss 计算中的大值）在 fp16 下可能溢出。
+      bf16 的数值范围更大但精度更低，对某些模型可能不合适。
+    resolution: >
+      1. 优先尝试 bf16（A100/H100 可用），数值稳定性更好
+      2. 如果使用 fp16，启用 loss scaling（PyTorch GradScaler）
+      3. 将 loss 计算和其他敏感操作保持在 fp32
+      4. 如果遇到 NaN，先切回 fp32 验证正确性
+    keywords: [mixed precision, fp16, bf16, NaN, loss scaling, 混合精度]
+    source: "PyTorch AMP 文档；NVIDIA 训练指南"
+
+  # ── LLM Specific ────────────────────────────────────────────────────
+  - id: "llm-001"
+    title: "LoRA rank 和 alpha 的选择"
+    domains: [llm]
+    components: [weight_injection, lora]
+    severity: critical
+    paper_claims: "We use LoRA with rank=8"
+    reality: >
+      LoRA 的 rank、alpha、target_modules 的选择对下游性能影响很大。
+      论文可能只提了 rank，但 alpha（通常设为 rank 的 2 倍或等于 rank）
+      和 target_modules（只对 Q/V 还是包含 K/O/FFN）同样关键。
+      此外，LoRA dropout 的值（通常 0.05 或 0.1）也影响泛化。
+    resolution: >
+      1. rank: 从 8 或 16 开始；复杂任务可能需要 64+
+      2. alpha: 通常设为 rank 或 2×rank
+      3. target_modules: 最低要求是 q_proj + v_proj；全量包含 q,k,v,o,ffn 层
+      4. 搜索论文的 HuggingFace 模型卡或官方 LoRA 配置
+    keywords: [LoRA, rank, alpha, target_modules, PEFT, 微调]
+    source: "Hu et al. 'LoRA: Low-Rank Adaptation' (2022); 社区实践经验"
+
+  - id: "llm-002"
+    title: "Flash Attention 版本兼容性"
+    domains: [llm, nlp]
+    components: [attention, infrastructure]
+    severity: warning
+    paper_claims: "We use FlashAttention for efficient training"
+    reality: >
+      Flash Attention 有 v1、v2、v3 多个版本，不同版本对硬件（GPU 架构）、
+      CUDA 版本、PyTorch 版本有不同的要求。v1 仅支持 Ampere+ (A100+)，
+      v2 支持 Turing+ (T4+)。如果用户硬件不支持，训练会出错或 fallback
+      到标准 attention（慢且显存占用大）。
+    resolution: >
+      1. 检查 GPU 架构：A100+ 支持 FlashAttention v2/v3，V100 需要 v1
+      2. 安装对应版本：pip install flash-attn --no-build-isolation
+      3. 如果无法安装，使用 xformers 的 memory_efficient_attention 替代
+      4. 作为最后的手段，使用 PyTorch 2.0+ 的 torch.nn.functional.scaled_dot_product_attention
+    keywords: [FlashAttention, flash-attn, xformers, attention, GPU, CUDA]
+    source: "FlashAttention GitHub；HuggingFace transformers 集成文档"
+
+  - id: "llm-003"
+    title: "Chat template 不一致"
+    domains: [llm]
+    components: [evaluation, inference]
+    severity: critical
+    paper_claims: 通常只说使用了某个 base model
+    reality: >
+      基于 LLaMA/Qwen/Mistral 等 base model 的微调，其 chat template
+      （system prompt 格式、round 分隔符、eos token 位置）直接影响评估结果。
+      即使模型权重正确，template 不一致可能使 benchmark 分数降低 5-15%。
+    resolution: >
+      1. 从 base model 的 tokenizer_config.json 获取原始 chat template
+      2. 确认论文是否使用了相同的 template 还是自定义了
+      3. 在评估时显式指定 chat template，不要依赖 tokenizer 默认值
+      4. 使用 lm-eval-harness 时确认 --apply_chat_template 参数
+    keywords: [chat template, tokenizer, LLaMA, Qwen, Mistral, 对话格式]
+    source: "Open LLM Leaderboard 社区报告；lm-eval-harness issues"
+
+  - id: "llm-004"
+    title: "QLoRA 的 NF4 量化与 bf16 兼容性"
+    domains: [llm]
+    components: [weight_injection, qlora, quantization]
+    severity: warning
+    paper_claims: "We use QLoRA (4-bit quantization) for efficient fine-tuning"
+    reality: >
+      QLoRA 使用的 NF4 数据类型在推理时需要转换为 bf16/fp16 进行计算。
+      bitsandbytes 库的版本、CUDA 版本、GPU 架构的组合可能导致
+      加载失败或计算错误。此外，NF4 量化的 computation dtype 需要与
+      LoRA 权重的 dtype 一致。
+    resolution: >
+      1. 使用最新的 bitsandbytes (>=0.41.0)
+      2. 设置 bnb_4bit_compute_dtype=torch.bfloat16
+      3. 确认 GPU 架构支持（Turing+ 通常可以）
+      4. 如果遇到问题，回退到 8-bit (int8) 量化
+    keywords: [QLoRA, NF4, bitsandbytes, 4-bit, quantization, 量化]
+    source: "Dettmers et al. 'QLoRA' (2023); HuggingFace PEFT 文档"
+
+  # ── NLP Specific ────────────────────────────────────────────────────
+  - id: "nlp-001"
+    title: "Tokenizer 的特殊 token 处理"
+    domains: [nlp, llm]
+    components: [tokenizer, preprocessing]
+    severity: warning
+    paper_claims: 通常只说使用了某个 tokenizer
+    reality: >
+      Tokenizer 的 [CLS], [SEP], [PAD], [MASK] 等特殊 token 的 ID
+      在不同预训练模型中不同。如果用户换了模型但没有更新特殊 token ID，
+      可能导致模型完全不工作或性能异常。
+    resolution: >
+      1. 始终从预训练模型的 tokenizer 获取特殊 token ID
+      2. 不要写死 token ID（如 [PAD]=0）
+      3. 确认 padding side 设置正确（BERT 用 right，GPT 用 left）
+    keywords: [tokenizer, special tokens, CLS, SEP, PAD, MASK, padding]
+    source: "HuggingFace transformers 文档"
+
+  - id: "nlp-002"
+    title: "Warmup steps 对 Transformer 训练至关重要"
+    domains: [nlp, llm]
+    components: [training_recipe, lr_schedule, warmup]
+    severity: critical
+    paper_claims: "Learning rate = 5e-5"（有时不提 warmup）
+    reality: >
+      Transformer 模型对学习率 warmup 非常敏感。不进行 warmup 或
+      warmup 步数不足可能导致训练初期 loss 振荡甚至发散。论文如果不提
+      warmup，通常使用了 10% 的训练步数作为 warmup。
+    resolution: >
+      1. 默认使用 10% 的训练步数作为 warmup
+      2. 如果总步数很少（< 1000），使用 100-200 步 warmup
+      3. 对于大模型微调，100-500 步 warmup 通常足够
+    keywords: [warmup, learning rate, transformer, 预热, 学习率]
+    source: "Vaswani et al. 'Attention Is All You Need' (2017); BERT/LLM 训练实践"
+
+  # ── CV Specific ─────────────────────────────────────────────────────
+  - id: "cv-001"
+    title: "预训练权重加载的不完全匹配"
+    domains: [cv]
+    components: [backbone, pretrained_weights]
+    severity: warning
+    paper_claims: "We use ImageNet-pretrained ResNet-50"
+    reality: >
+      不同来源的预训练权重（torchvision、timm、open-mmlab）即使
+      都是 "ImageNet-pretrained ResNet-50"，其具体精度和参数格式
+      可能有细微差异（如分类头层的命名）。直接加载可能报错或精度不一致。
+    resolution: >
+      1. 优先使用论文提到的具体来源（如 timm）
+      2. 使用严格的 key 匹配加载，记录未匹配的 keys
+      3. 如果权重不匹配，在小数据集上微调额外几个 epoch 以补偿
+      4. 记录使用的预训练权重的 URL 或 hash
+    keywords: [pretrained, ImageNet, weights, 预训练, timm, torchvision]
+    source: "timm 库文档；社区常见问题"
+
+  - id: "cv-002"
+    title: "检测/分割任务的 NMS 和后处理参数"
+    domains: [cv]
+    components: [evaluation, head]
+    severity: critical
+    paper_claims: 通常只说 "we use standard NMS"
+    reality: >
+      目标检测和实例分割的 NMS 阈值、score threshold、每张图最大检测数
+      等后处理参数直接影响 mAP 等指标。不同论文的"标准 NMS"可能不同。
+      论文报告的精度对这些参数可能极其敏感（0.01 的阈值差异可能导致
+      0.5-1.0 mAP 的变化）。
+    resolution: >
+      1. 搜索论文或官方代码中的 NMS 配置（IoU threshold, score threshold）
+      2. 常见的 NMS IoU 阈值为 0.5（COCO）或 0.6（自定义）
+      3. 如果论文比较了速度，检查 max_detections_per_image
+      4. 与同一 benchmark 的其他方法的配置对齐
+    keywords: [NMS, detection, mAP, post-processing, 非极大值抑制, 后处理]
+    source: "MMDetection 默认配置；COCO 评估协议"
+
+  # ── Evaluation ──────────────────────────────────────────────────────
+  - id: "eval-001"
+    title: "评估时未切换 model.eval()"
+    domains: [cv, nlp, general]
+    components: [evaluation]
+    severity: critical
+    paper_claims: 不适用（属于实现细节）
+    reality: >
+      忘记在评估前调用 model.eval() 会导致 BatchNorm/Dropout 等层
+      在推理时仍处于训练模式，结果不准确且不可复现。这是一个初级但
+      极其常见的错误。
+    resolution: >
+      1. 在所有评估代码前显式调用 model.eval()
+      2. 使用 torch.no_grad() 上下文管理器
+      3. 在训练代码中使用标志位切换 train/eval 模式
+    keywords: [model.eval(), evaluation, BatchNorm, Dropout, 评估模式]
+    source: "PyTorch 基础文档"
+
+  - id: "eval-002"
+    title: "随机种子未固定导致结果不可复现"
+    domains: [cv, nlp, llm, general]
+    components: [training_recipe, evaluation]
+    severity: warning
+    paper_claims: 大多数论文不提随机种子
+    reality: >
+      即使代码完全相同，不同的随机种子可能导致 0.5-2% 的精度差异。
+      此外，某些 CUDA 操作的数值结果在不同 GPU 架构或 CUDA 版本上
+      可能不完全相同（即使种子固定）。
+    resolution: >
+      1. 固定 Python、NumPy、PyTorch 的随机种子
+      2. 设置 torch.backends.cudnn.deterministic = True（可能影响速度）
+      3. 至少报告 3 次不同 seed 的均值和标准差
+      4. 注意：cudnn.deterministic 不保证跨 GPU 架构的可复现性
+    keywords: [seed, random, deterministic, 随机种子, reproducibility, 可复现性]
+    source: "PyTorch reproducibility 文档"
+
+  # ── Distributed Training ────────────────────────────────────────────
+  - id: "dist-001"
+    title: "分布式训练的同步 BN 和梯度累积"
+    domains: [cv, nlp, llm, general]
+    components: [training_recipe, infrastructure]
+    severity: warning
+    paper_claims: "Trained on 8 GPUs"（不提 sync 策略）
+    reality: >
+      多 GPU 训练时，BatchNorm 的统计量默认只在单 GPU 内计算。
+      如果每 GPU 的 batch size 很小（< 8），BN 统计量不准确，
+      需要 SyncBN。同样，梯度累积的步数和 DDP 的同步频率需要协调。
+    resolution: >
+      1. 每 GPU batch size < 8 时，使用 SyncBN
+      2. 梯度累积步数 = effective_batch_size / (per_gpu_batch_size × num_gpus)
+      3. 验证 loss 曲线是否与论文一致（不一致说明有同步问题）
+    keywords: [DDP, SyncBN, gradient accumulation, distributed, 分布式]
+    source: "PyTorch DDP 教程；大规模训练最佳实践"

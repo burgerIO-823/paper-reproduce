@@ -1,0 +1,29 @@
+name: "transformer_encoder_block"
+type: "nlp.backbone"
+domain: "nlp"
+spec_version: "1.0"
+description: "Standard transformer encoder block with multi-head self-attention and FFN"
+
+source:
+  paper: "Attention Is All You Need"
+  arxiv_id: "1706.03762"
+  url: "https://arxiv.org/abs/1706.03762"
+
+interface:
+  inputs:
+    x: "(B, L, hidden_size)"
+    attention_mask: "(L, L) or (B, L, L) — optional"
+  outputs:
+    output: "(B, L, hidden_size)"
+
+dependencies:
+  - package: "torch>=1.8"
+
+tags:
+  - transformer
+  - encoder
+  - self-attention
+  - nlp
+  - backbone
+
+code_file: "transformer_encoder_block.py"
